@@ -17,10 +17,9 @@ Interactive facility graph
 ├── data
 │ ├── facility.graphml 
 │ └── facility.png 
-├── generate_graph.py 
+├── build_graphml.py 
 ├── index.html 
 ├── README.md 
-└── requirements.txt 
 ```
 # Usage
 
