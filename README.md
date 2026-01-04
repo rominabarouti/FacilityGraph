@@ -42,7 +42,7 @@ python -m http.server
 Open your browser at:
 
 ```bash
-http://localhost:8000/graph.html
+http://localhost:8000/index.html
 ```
 
 The interactive graph will be displayed on the main page.
