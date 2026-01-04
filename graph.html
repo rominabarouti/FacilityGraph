@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>IFC Space Graph Viewer</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/3d-force-graph"></script>
+
+  <style>
+    body { margin:0; background:white; color:black; font-family:Arial; }
+    #3d-graph { position:fixed; inset:0; }
+    .scene-nav-info { display: none !important; }
+
+    #controls {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(255,255,255,0.9);
+      padding: 15px 18px;
+      border-radius: 10px;
+      width: 260px;
+      font-size: 14px;
+      z-index: 9999;
+      color:black;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+    }
+
+    #controls select, #controls button {
+      width: 100%;
+      padding: 6px;
+      margin-top: 8px;
+      font-size: 14px;
+      border-radius: 6px;
+      border: 1px solid rgba(0,0,0,0.2);
+      background: white;
+      color: black;
+    }
+
+    #instructions {
+      position: fixed;
+      bottom: 10px;
+      width: 100%;
+      text-align: center;
+      font-size: 13px;
+      color: #333333;
+      pointer-events: none;
+    }
+  </style>
+</head>
+
+<body>
+
+<div id="controls">
+  <strong style="font-size:16px">Graph Controls</strong><br><br>
+
+  Highlight space & adjacencies<br>
+  <select id="roomSelect">
+    <option value="__all__">All</option>
+  </select>
+
+  <br><br>
+
+  Filter by ISO grade <br>
+  <select id="gradeSelect">
+    <option value="__all__">All</option>
+    <option value="7">ISO 7 / Grade C</option>
+    <option value="8">ISO 8 / Grade D</option>
+    <option value="0">Unclassified</option>
+    <option value="LEVEL">Level</option>
+  </select>
+
+  <button onclick="resetGraph()" style="margin-top:12px;">
+    Show Full Graph
+  </button>
+</div>
+
+<div id="3d-graph"></div>
+
+<div id="instructions">
+  Left-click: rotate &nbsp; | &nbsp; Mouse-wheel: zoom &nbsp; | &nbsp; Right-click: pan
+</div>
+
+<script type="module">
+import SpriteText from "https://esm.sh/three-spritetext";
+
+let fullData = null;
+let currentData = null;
+
+function getIsoRaw(node) {
+  const v = (node.iso ?? node.d4 ?? "").toString().trim();
+  return v === "" ? "0" : v;
+}
+
+function isoClassLabel(iso) {
+  return iso === "0" ? "Unclassified" : `ISO ${iso}`;
+}
+
+function getNodeColor(node) {
+  // Non-space nodes
+  if (node.ifc_type !== "IfcSpace") return "#b180ff";
+
+  switch (getIsoRaw(node)) {
+    case "5": return "#4a84ff";
+    case "7": return "#8bd46b";
+    case "8": return "#ffb36b";
+    case "0": return "#d0d0d0";
+    default:  return "#d0d0d0";
+  }
+}
+
+function formatNodeHover(node) {
+  const name = node.name || node.id;
+
+  let html = `<b>${name}</b>`;
+  if (node.ifc_type === "IfcSpace") {
+    html += `<br>ISO class: ${isoClassLabel(getIsoRaw(node))}`;
+    if (node.area) html += `<br>Area: ${node.area} m²`;
+    if (node.volume) html += `<br>Volume: ${node.volume} m³`;
+  }
+  return html;
+}
+
+function baseLinkColor(link) {
+  return link.type === "contains"
+    ? "rgba(0,150,255,0.55)"
+    : "rgba(0,0,0,0.18)";
+}
+
+const Graph = ForceGraph3D()(document.getElementById("3d-graph"))
+  .backgroundColor("#ffffff")
+  .nodeColor(n => getNodeColor(n))
+  .nodeLabel(n => formatNodeHover(n))
+  .nodeVal(() => 1)
+  .nodeRelSize(3.2)
+
+  .nodeThreeObject(node => {
+    const label = new SpriteText(node.name || node.id);
+    label.color = "black";
+    label.textHeight = node.ifc_type === "IfcSpace" ? 2.1 : 1.6;
+    label.position.y = 4.0;
+    return label;
+  })
+  .nodeThreeObjectExtend(true)
+
+  .linkWidth(0.6)
+  .linkOpacity(0.25)
+  .linkColor(l => baseLinkColor(l));
+
+/* Hover: connected edges turn yellow */
+Graph.onNodeHover(node => {
+  Graph.linkColor(l => {
+    const s = typeof l.source === "object" ? l.source.id : l.source;
+    const t = typeof l.target === "object" ? l.target.id : l.target;
+    if (node && (s === node.id || t === node.id)) return "gold";
+    return baseLinkColor(l);
+  });
+});
+
+Graph.onNodeClick(node => {
+  const distance = 55;
+  const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z);
+  Graph.cameraPosition(
+    { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
+    node,
+    1500
+  );
+});
+
+function resetGraph() {
+  currentData = fullData;
+  Graph.graphData(fullData);
+  document.getElementById("roomSelect").value = "__all__";
+  document.getElementById("gradeSelect").value = "__all__";
+}
+
+/* Room filter */
+function highlightRoom(roomId) {
+  if (roomId === "__all__") return resetGraph();
+
+  const keep = new Set([roomId]);
+
+  fullData.links.forEach(l => {
+    const s = typeof l.source === "object" ? l.source.id : l.source;
+    const t = typeof l.target === "object" ? l.target.id : l.target;
+    if (s === roomId) keep.add(t);
+    if (t === roomId) keep.add(s);
+  });
+
+  const nodes = fullData.nodes.filter(n => keep.has(n.id));
+  const links = fullData.links.filter(l => {
+    const s = typeof l.source === "object" ? l.source.id : l.source;
+    const t = typeof l.target === "object" ? l.target.id : l.target;
+    return keep.has(s) && keep.has(t);
+  });
+
+  currentData = { nodes, links };
+  Graph.graphData(currentData);
+}
+
+/* ISO filter */
+function filterByGrade(grade) {
+  if (grade === "__all__") return resetGraph();
+
+  const nodes = fullData.nodes.filter(n => {
+    if (grade === "LEVEL") return n.ifc_type !== "IfcSpace";
+    if (n.ifc_type !== "IfcSpace") return false;
+    return getIsoRaw(n) === grade;
+  });
+
+  const ids = new Set(nodes.map(n => n.id));
+
+  const links = fullData.links.filter(l => {
+    const s = typeof l.source === "object" ? l.source.id : l.source;
+    const t = typeof l.target === "object" ? l.target.id : l.target;
+    return ids.has(s) && ids.has(t);
+  });
+
+  currentData = { nodes, links };
+  Graph.graphData(currentData);
+}
+
+async function loadGraphML(url="data/facility.graphml") {
+  const text = await (await fetch(url)).text();
+  const xml = new DOMParser().parseFromString(text, "application/xml");
+
+  const keyMap = {};
+  [...xml.getElementsByTagName("key")].forEach(k => {
+    const id = k.getAttribute("id");
+    const attrName = k.getAttribute("attr.name");
+    if (id) keyMap[id] = attrName || id;
+  });
+
+  let nodes = [...xml.getElementsByTagName("node")].map(n => {
+    const id = n.getAttribute("id");
+    const obj = { id };
+
+    [...n.getElementsByTagName("data")].forEach(d => {
+      const keyId = d.getAttribute("key");
+      const keyName = keyMap[keyId] || keyId;
+      const val = d.textContent.trim();
+
+      obj[keyName] = val; // e.g. obj.iso
+      obj[keyId] = val;   // e.g. obj.d4
+    });
+
+    return obj;
+  });
+
+  let links = [...xml.getElementsByTagName("edge")].map(e => {
+    const link = { source: e.getAttribute("source"), target: e.getAttribute("target") };
+
+    [...e.getElementsByTagName("data")].forEach(d => {
+      const keyId = d.getAttribute("key");
+      const keyName = keyMap[keyId] || keyId;
+      const val = d.textContent.trim();
+      link[keyName] = val;
+      link[keyId] = val;
+    });
+
+    return link;
+  });
+
+  // Remove Level 2 if needed
+  nodes = nodes.filter(n => (n.name || "").trim().toLowerCase() !== "level 2");
+
+  fullData = { nodes, links };
+  currentData = fullData;
+
+  Graph.graphData(fullData);
+
+  const roomSelect = document.getElementById("roomSelect");
+  roomSelect.innerHTML = `<option value="__all__">All</option>`;
+
+  const spaceNodes = nodes
+    .filter(n => n.ifc_type === "IfcSpace")
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+  spaceNodes.forEach(n => {
+    const opt = document.createElement("option");
+    opt.value = n.id;
+    opt.textContent = n.name || n.id;
+    roomSelect.appendChild(opt);
+  });
+
+  roomSelect.onchange = e => highlightRoom(e.target.value);
+  document.getElementById("gradeSelect").onchange = e => filterByGrade(e.target.value);
+}
+
+loadGraphML();
+</script>
+
+</body>
+</html>
