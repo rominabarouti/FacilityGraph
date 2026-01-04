@@ -5,8 +5,7 @@ It builds a spatial adjacency and containment graph from IFC data and renders it
 
 The graph data is generated using a Python script and visualized as a web-based interactive viewer.
 
-The visualization is based on the 3D Force Graph web representation by  
-Copyright (c) 2017 Vasco Asturiano.
+The visualization is based on the 3D Force Graph web representation by Copyright (c) 2017 Vasco Asturiano.
 
 ---
 
